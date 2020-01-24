@@ -38,14 +38,15 @@ def discretized_normal(yvals, mean, sd):
     pr_nearest = top_dist - bot_dist #this gives probability of all nearest neighbors to a point
     return pr_nearest
 
-def discretized_normal_log(yvals, mean, sd):
-    s = yvals[1] - yvals[0] #distance between points in ygrid
-    bot_dist = norm.logcdf(x=yvals - s/2.0, loc=mean, scale=sd) #LOG cdf at midpoint between point in grid and previous point
-    top_dist = norm.logcdf(x=yvals + s/2.0, loc=mean, scale=sd) #LOG cdf at midpoint between point in grid and next point
-    diff = top_dist + np.log(-np.expm1(bot_dist - top_dist)) #log1p difference formula
-    diff[0] = top_dist[0] #first value should integrate from -inf
-    diff[-1] = norm.logsf(x=ygrid[-1] - s/2.0, loc=mean, scale=sd) #last value should integrate to inf
-    return diff
+# not used, I will comment it out
+#  def discretized_normal_log(yvals, mean, sd):
+#      s = yvals[1] - yvals[0] #distance between points in ygrid
+#      bot_dist = norm.logcdf(x=yvals - s/2.0, loc=mean, scale=sd) #LOG cdf at midpoint between point in grid and previous point
+#      top_dist = norm.logcdf(x=yvals + s/2.0, loc=mean, scale=sd) #LOG cdf at midpoint between point in grid and next point
+#      diff = top_dist + np.log(-np.expm1(bot_dist - top_dist)) #log1p difference formula
+#      diff[0] = top_dist[0] #first value should integrate from -inf
+#      diff[-1] = norm.logsf(x=ygrid[-1] - s/2.0, loc=mean, scale=sd) #last value should integrate to inf
+#      return diff
 
 def discretized_normal_log2(yvals, mean, sd):
     s = yvals[1] - yvals[0] #distance between points in ygrid
@@ -480,17 +481,15 @@ class Structmodel(Model):
         return sol
 
 
-
-
-
-def transform_pars(pars, qd, qr):
-    qhigh = max(qd, qr)
-    qlow = min(qd, qr)
-    etah = pars[1] + math.exp(pars[0])
-    etal = pars[1]
-    tauy = math.exp(pars[2])
-    prg = qhigh + (1-qhigh)*(1 + math.exp(-pars[3]))**(-1)
-    prb = qlow*(1 + math.exp(-pars[4]))**(-1)
-    etam = pars[5:(5+nm)]
-    beta = pars[5+nm]
-    return [etah, etal, tauy, np.array([(qd - prb)/(prg - prb), (qr - prb)/(prg - prb)]), prg, prb, etam, beta]
+# # this function seems to be not used anywhere, but has error (undeclared `nm`)
+# def transform_pars(pars, qd, qr):
+#     qhigh = max(qd, qr)
+#     qlow = min(qd, qr)
+#     etah = pars[1] + math.exp(pars[0])
+#     etal = pars[1]
+#     tauy = math.exp(pars[2])
+#     prg = qhigh + (1-qhigh)*(1 + math.exp(-pars[3]))**(-1)
+#     prb = qlow*(1 + math.exp(-pars[4]))**(-1)
+#     etam = pars[5:(5+nm)]
+#     beta = pars[5+nm]
+#     return [etah, etal, tauy, np.array([(qd - prb)/(prg - prb), (qr - prb)/(prg - prb)]), prg, prb, etam, beta]  # noqa
