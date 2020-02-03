@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import pymc3 as pm
 import quantecon as qe
 import scipy.sparse as sparse
 from scipy.stats import norm
@@ -16,11 +17,7 @@ import pandas as pd
 import scipy.optimize as opt
 import math
 import importlib
-import pymc3 as pm
 import eq
-
-importlib.reload(eq)
-
 
 ## some sample parameters for testing functions
 pol_br_sample = np.repeat(.5, 20)
@@ -56,22 +53,7 @@ E = M.eq_compute(pol_br_sample,
                  beta_sample,
                  delta_sample)
 
-
-#import cProfile
-#cProfile.run('M.eq_compute(pol_br_sample, etah_sample,etal_sample,tauy_sample,pipar_sample,prg_sample,prb_sample,pm_sample,etam_sample,beta_sample,delta_sample)', 'profstats')
-
-#import pstats
-
-#p = pstats.Stats('profstats')
-#p.strip_dirs().sort_stats(2).print_stats(20)
-
 #this simulates some data from my model and stores in a Structmodel object
 # which includes a dataset as well as some of the information used to set
 #up the model
 D = eq.Structmodel(E.eq_simulate(1000, 100000, my_ygrid, M.statelist, 5), my_ygrid, 5)
-#next line generates some random  for parameters
-
-#next line attempts to build the model: should currently get an error about
-#setting an array element with a sequence
-T = D.create_model(pm_sample, pol_br_sample, delta_sample)
-T.shape

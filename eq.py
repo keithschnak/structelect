@@ -7,6 +7,7 @@ from scipy.stats import norm
 from scipy.stats import binom
 from quantecon import compute_fixed_point
 from quantecon.markov import DiscreteDP
+import numpy.linalg
 import scipy.special as sps
 import itertools as it
 import time
@@ -15,6 +16,7 @@ from functools import partial
 import pandas as pd
 import scipy.optimize as opt
 import math
+import pymc3 as pm
 
 #the functions in this file are used to compute an equilibrium to my game theoretic
 #model and then to compute the log likelihood of a statistical model
@@ -367,6 +369,8 @@ class Model:
         sol = Equilibrium(roottest.x, vdpp.vsol, vdpp.R, vdpp.Q)
         return sol
 
+
+
 #this is just my attempt to vectorize the logsumexp function for speed
 def vlogsumexp(A, B, C):
     mymax = np.maximum(A, np.maximum(B, C))
@@ -410,6 +414,7 @@ class Structmodel(Model):
         data['zd_1'] = data['zd_1'].astype(int)
         data['zr_1'] = data['zr_1'].astype(int)
         data['m_1'] = data['m_1'].astype(int)
+        data[['rvotes_2', 'dvotes_2']] = data[['rvotes_2', 'dvotes_2']].fillna(value=0)
         govind = data['party_1']*2*nm + (data['party_1']*data['zr_1'] + (1-data['party_1'])*data['zd_1'])*nm + data['m_1']
         self.infoset1 = infoset1
         self.infoset2 = infoset2
@@ -421,10 +426,8 @@ class Structmodel(Model):
         self.qlow = qlow
         self.govind = govind
         Model.__init__(self, ygrid, nm)
-    #the next function is the likelihood function -- the main target function
-    #I want to optimize. note that the function first computes an equilibrium to
-    #the model given the parameters and THEN computes the likelihood, which is why
-    #it is so slow.
+        self.Y = data[['y_1', 'y_2']]
+    #likelihood function
     def my_ll(self, pars, Pm, pol_br_init, delta):
         #assign parameters to natural names for readability
         etah = pars[1] + math.exp(pars[0])
@@ -474,14 +477,58 @@ class Structmodel(Model):
         lli[tt] = lli[tt] + binom.logpmf(k=self.data.loc[tt, 'rvotes_2'], n=self.data.loc[tt, 'rvotes_2'] + \
                   self.data.loc[tt, 'rvotes_2'], p=rvoteprob2)
         return np.sum(-2*lli)
-    #this function would compute the mle 
-    def my_mle(self, init, Pm, pol_br_init, delta):
-        sol = opt.basinhopping(func=self.my_ll, x0=init, minimizer_kwargs={"args":(Pm, pol_br_init, delta)}, niter=5000)
-        return sol
+    def eqinfo(self, etah, etal, tauy, prg, prb, etam, beta, Pm, pol_br_init, delta):
+        ot = self.ot
+        tt = self.tt
+        pipar = np.array([(self.qd - prb)/(prg - prb), (self.qr - prb)/(prg - prb)])
 
+        eq = self.eq_compute(pol_br_init, etah, etal, tauy, pipar, prg, prb, Pm, etam, beta, delta)
+        peff = eq.pol_strat[self.govind]
+        peff[peff==0] = .000001
+        v_dem = eq.Q[range(self.nstates), :] @ eq.voter_sol.v + eq.R[range(self.nstates)]
+        v_rep = eq.Q[range(self.nstates, 2*self.nstates), :] @ eq.voter_sol.v + eq.R[range(self.nstates, 2*self.nstates)]
+        rvoteprob1 = np.exp(v_rep[self.infoset1])/(np.exp(v_dem[self.infoset1]) + np.exp(v_rep[self.infoset1]))
+        rvoteprob2 = rvoteprob1
+        rvoteprob2[tt] = np.exp(v_rep[self.infoset2])/(np.exp(v_dem[self.infoset2]) + np.exp(v_rep[self.infoset2]))
+        returnmat = np.vstack((peff, rvoteprob1, rvoteprob2))
+        return returnmat
+    #pymc3 model
+    def create_model(self, Pm, pol_br_init, delta):
+        with pm.Model() as model:
+            #set priors for parameters
+            etal = pm.Normal("eta_l", mu=0, sigma=10)
+            etad = pm.HalfNormal("eta_d", sigma=2)
+            etah = pm.Deterministic("eta_h", etal+etad)
+            tauy = pm.HalfNormal("tau_y", sigma=2)
+            prg = pm.Uniform("prg", lower=self.qhigh, upper=1)
+            prb = pm.Uniform("prb", lower=0, upper=self.qlow)
+            etam = pm.Normal("etam", mu=0, sigma=10, shape=self.nm)
+            beta = pm.Normal("beta", mu=0, sigma=10)
 
+            #eqvars is a deterministic variable that computes the equilibrium and returns the stuff I need for the likelihood
+            eqvars = pm.Deterministic("eqvars", self.eqinfo(etah, etal, tauy, prg, prb, etam, beta, Pm, pol_br_init, delta))
+            peff = eqvars[0]
+            rvoteprob1 = eqvars[1]
+            rvoteprob2 = eqvars[2]
 
+            #compute initial voter beliefs
+            zdata = self.data['party_1']*self.data['zr_1'] + (1-self.data['party_1'])*self.data['zd_1']
+            mu_top = pipardata*(prg**zdata)*(1-prg)**(1 - zdata)
+            mu_bottom = mu_top + (1-pipardata)*(prb**zdata)*(1-prb)**(1-zdata)
+            mu = mu_top/mu_bottom
 
+            #mixture weights: [good type, bad type high effort, bad type low effort]
+            my_w = [mu, (1-mu)*peff, (1-mu)*(1-peff)]
+
+            #component distributions (2-dimensional multivariate normals)
+            mvcomp1 = pm.MvNormal("ydist", mu=[etah, etah], cov=np.identity(3)*(tauy**(-2)), shape=2)
+            mvcomp2 = pm.MvNormal("ydist", mu=[etah, etal], cov=np.identity(3)*(tauy**(-2)), shape=2)
+            mvcomp3 = pm.MvNormal("ydist", mu=[etal, etal], cov=np.identity(3)*(tauy**(-2)), shape=2)
+
+            #likelihood
+            Y_obs = pm.Mixture('Y', w=my_w, comp_dists=[mvcomp1, mccomp2, mccomp3], observed=Y)
+            rvotes1 = pm.Binomial(n=self.data[rvotes_1] + self.data[dvotes_1], p=rvoteprob1, observed=self.data[rvotes_1])
+            rvotes2 = pm.Binomial(n=self.data[rvotes_2] + self.data[dvotes_2], p=rvoteprob1, observed=self.data[rvotes_2])
 
 def transform_pars(pars, qd, qr):
     qhigh = max(qd, qr)
